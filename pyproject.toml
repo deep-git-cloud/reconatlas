@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reconatlas"
+version = "0.1.0"
+description = "Recon a domain, IP, email or username from one CLI. Subdomain enumeration, DNS, RDAP, TLS, breach corpora, EXIF and 40+ username platforms - all on free, keyless sources."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "deep-git-cloud" }]
+keywords = [
+    "osint",
+    "recon",
+    "reconnaissance",
+    "subdomain",
+    "subdomain-enumeration",
+    "passive-dns",
+    "certificate-transparency",
+    "dns",
+    "rdap",
+    "exif",
+    "metadata",
+    "username-enumeration",
+    "threat-intelligence",
+    "security-tooling",
+    "cli",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+]
+
+dependencies = [
+    "requests>=2.31",
+    "click>=8.1",
+    "rich>=13.0",
+    "dnspython>=2.4",
+    "Pillow>=10.0",
+    "beautifulsoup4>=4.12",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4"]
+
+[project.urls]
+Homepage = "https://github.com/deep-git-cloud/reconatlas"
+Repository = "https://github.com/deep-git-cloud/reconatlas"
+Issues = "https://github.com/deep-git-cloud/reconatlas/issues"
+Changelog = "https://github.com/deep-git-cloud/reconatlas/blob/main/CHANGELOG.md"
+
+[project.scripts]
+osint = "reconatlas.cli:main"
+reconatlas = "reconatlas.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

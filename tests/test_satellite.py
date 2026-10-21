@@ -319,6 +319,35 @@ def test_collect_reports_partial_source_errors() -> None:
     assert any("military" in err for err in summary["source_errors"])
 
 
+def test_collect_from_a_local_tle_file(tmp_path) -> None:
+    """--tle-file must work with no network access at all."""
+    path = tmp_path / "catalogue.tle"
+    path.write_text("\n".join([ISS_TLE, MH_TLE, CIVILIAN_TLE]))
+
+    class NoNetwork:
+        def get(self, *args: object, **kwargs: object) -> Fetch:
+            raise AssertionError("the network must not be touched with --tle-file")
+
+    findings, summary = sat.collect_satellites(NoNetwork(), tle_file=str(path), limit=0)
+    assert [f.meta["name"] for f in findings] == ["USA 224 (KH-11 14)"]
+    assert summary["catalog_size"] == 3
+    assert summary["catalog_group"] == "file:catalogue.tle"
+
+
+def test_tle_file_without_valid_entries(tmp_path) -> None:
+    path = tmp_path / "junk.txt"
+    path.write_text("not a tle at all\n")
+    findings, summary = sat.collect_satellites(None, tle_file=str(path))
+    assert findings == []
+    assert "no valid TLEs" in summary["error"]
+
+
+def test_missing_tle_file(tmp_path) -> None:
+    findings, summary = sat.collect_satellites(None, tle_file=str(tmp_path / "absent.tle"))
+    assert findings == []
+    assert summary["error"]
+
+
 def test_geojson_shape(stub: StubHttp) -> None:
     findings, _ = sat.collect_satellites(stub, limit=0)
     payload = sat.to_geojson(findings)

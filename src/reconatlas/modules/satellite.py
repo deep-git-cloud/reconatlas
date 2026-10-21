@@ -28,6 +28,7 @@ import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from ..models import Finding, ModuleResult
@@ -607,6 +608,18 @@ def _fetch_catalog(http: Any, group: str) -> tuple[list[Tle], str, bool]:
     return tles, "", fetch.stale
 
 
+def _load_tle_file(path: str) -> tuple[list[Tle], str]:
+    """Read a local two- or three-line TLE file. Returns ``(tles, error)``."""
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return [], f"{path}: {exc}"
+    tles = parse_tles(text)
+    if not tles:
+        return [], f"{path}: no valid TLEs found"
+    return tles, ""
+
+
 def geocode(http: Any, place: str) -> Observer | None:
     """Resolve a place name with OpenStreetMap Nominatim (keyless)."""
     fetch = http.get(
@@ -665,27 +678,42 @@ def collect_satellites(
     passes: int = 0,
     hours: float = 24.0,
     limit: int = 40,
+    tle_file: str | None = None,
 ) -> tuple[list[Finding], dict[str, Any]]:
     """Detect military satellites and report where they are.
+
+    ``tle_file`` reads a local two- or three-line TLE file and skips the
+    network entirely, which is the way around CelesTrak's download limit.
 
     Returns ``(findings, summary)`` so it can be driven by ``safe_collect``.
     """
     summary: dict[str, Any] = {"catalog_group": group}
     errors: list[str] = []
 
-    catalog, error, catalog_stale = _fetch_catalog(http, group)
-    if error:
-        errors.append(error)
-
-    # The curated military group is small (a few KB) and is the only
-    # *explicit* military signal in the catalogue, so always fetch it.
-    if group == "military":
-        military = catalog
+    if tle_file:
+        catalog, error = _load_tle_file(tle_file)
+        catalog_stale = False
+        military: list[Tle] = []
+        summary["catalog_group"] = f"file:{Path(tle_file).name}"
+        if error:
+            summary["error"] = error
+            return [], summary
+        # No network signal for the curated group; name heuristics only.
+        military_norad: set[str] = set()
     else:
-        military, mil_error, _ = _fetch_catalog(http, "military")
-        if mil_error:
-            errors.append(mil_error)
-    military_norad = {tle.norad for tle in military}
+        catalog, error, catalog_stale = _fetch_catalog(http, group)
+        if error:
+            errors.append(error)
+
+        # The curated military group is small (a few KB) and is the only
+        # *explicit* military signal in the catalogue, so always fetch it.
+        if group == "military":
+            military = catalog
+        else:
+            military, mil_error, _ = _fetch_catalog(http, "military")
+            if mil_error:
+                errors.append(mil_error)
+        military_norad = {tle.norad for tle in military}
 
     if not catalog and not military:
         summary["error"] = "; ".join(errors) or "no catalogue data"

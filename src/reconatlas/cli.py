@@ -524,6 +524,11 @@ def wayback_cmd(domain: str, limit: int, subdomains: bool, **kwargs: Any) -> Non
 @click.option("--hours", type=float, default=24.0, show_default=True, help="Pass search window.")
 @click.option("--limit", type=int, default=40, show_default=True, help="Maximum objects (0 = all).")
 @click.option(
+    "--tle-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=str),
+    help="Read TLEs from a local file instead of contacting CelesTrak (no download limit).",
+)
+@click.option(
     "--geojson",
     "geojson_path",
     type=click.Path(dir_okay=False, path_type=str),
@@ -541,6 +546,7 @@ def satellite_cmd(
     passes_n: int,
     hours: float,
     limit: int,
+    tle_file: str | None,
     geojson_path: str | None,
     **kwargs: Any,
 ) -> None:
@@ -595,6 +601,7 @@ def satellite_cmd(
             passes=passes_n,
             hours=hours,
             limit=limit,
+            tle_file=tle_file,
         )
     )
 

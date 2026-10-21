@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   next-pass prediction and GeoJSON export for map tools.
 - **`--place`** geocoding through OpenStreetMap Nominatim, so an observer
   position can be given as a place name.
+- **`--tle-file`** reads a local two- or three-line TLE file and skips the
+  network entirely, which avoids CelesTrak's download limit and works
+  offline.
 - **Stale-cache fallback.** `HttpClient.get()` accepts `ttl` and
   `allow_stale`; when an API refuses a refresh, the last good response can
   be reused instead of failing. Used for CelesTrak, which permits one

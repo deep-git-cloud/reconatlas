@@ -269,6 +269,7 @@ Give it an observer position and it adds look angles, filters to what is actuall
 osint satellite --place "London" --overhead
 osint satellite --lat 51.5 --lon -0.1 --passes 3 --hours 12
 osint satellite --place "London" --overhead --geojson sats.geojson
+osint satellite --tle-file ./active.tle      # offline, no download limit
 ```
 
 ```text
@@ -307,6 +308,7 @@ Nothing is inferred from radio, imagery or behaviour. The tool does not *detect*
 
 - Positions are only as good as the TLE epoch. A fresh TLE puts a LEO object within a few kilometres; a week-old one does not. The epoch and its age are in the JSON output.
 - CelesTrak refreshes every two hours and refuses repeat downloads of the same group from one address. reconatlas caches the catalogue for six hours and reuses a stale copy rather than failing. If there is no cached copy, it says when the next refresh is allowed rather than just erroring. Use `--no-cache` to force a refresh once the window has passed.
+- No keyless bulk source matches CelesTrak's coverage. Space-Track is the authoritative upstream but needs a free account, and SatNOGS is keyless but covers roughly 1,700 objects, mostly amateur and weather satellites. If you need to sidestep the download window entirely, export TLEs once and pass them with `--tle-file`; that path never touches the network.
 - Pass predictions sample every 20 seconds, so rise and set times are accurate to about that. Peak elevation is refined further.
 - GPS, GLONASS and BeiDou are reported as `navigation` because they are military-operated, but they are dual-use. Filter them out with `--class` if you only want reconnaissance and warning systems.
 - This is public orbital data. It tells you where a catalogued object is, not what it is looking at.

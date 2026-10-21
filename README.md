@@ -273,7 +273,7 @@ osint satellite --tle-file ./active.tle      # offline, no download limit
 ```
 
 ```text
-military satellites  8 shown
+military satellites  8 shown  ·  14:32:07Z
 catalog=15,923, matched=420, classes: comms=1,navigation=5,recon=1, observer=London, England
 
 ┏━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━┳━━━━━━┓
@@ -286,6 +286,18 @@ catalog=15,923, matched=420, classes: comms=1,navigation=5,recon=1, observer=Lon
 ```
 
 *(trimmed — positions change constantly.)*
+
+### Watch them move
+
+Positions are computed locally, so a live view costs one download, not one per refresh:
+
+```bash
+osint satellite --place "London" --overhead --watch 5
+```
+
+Every five seconds the table is redrawn at the current clock. Only SGP4 is re-run — the orbital elements are parsed once and cached — so a long watch session never touches the network again. The UTC stamp in the header shows which moment you are looking at; `Ctrl-C` stops it.
+
+Piped output cannot be redrawn, so `--watch` prints a single frame and exits when stdout is not a terminal. Exports (`--json`, `--csv`, `--geojson`, …) cannot be combined with it.
 
 ### How detection works
 
@@ -307,7 +319,7 @@ Nothing is inferred from radio, imagery or behaviour. The tool does not *detect*
 ### Caveats
 
 - Positions are only as good as the TLE epoch. A fresh TLE puts a LEO object within a few kilometres; a week-old one does not. The epoch and its age are in the JSON output.
-- CelesTrak refreshes every two hours and refuses repeat downloads of the same group from one address. reconatlas caches the catalogue for six hours and reuses a stale copy rather than failing. If there is no cached copy, it says when the next refresh is allowed rather than just erroring. Use `--no-cache` to force a refresh once the window has passed.
+- CelesTrak refreshes every two hours and refuses repeat downloads of the same group from one address. reconatlas caches the catalogue for six hours and reuses a stale copy rather than failing. If there is no cached copy, it says when the next refresh is allowed rather than just erroring. Use `--no-cache` to force a refresh once the window has passed. Caching limits *downloads*, not queries: every run — and every `--watch` refresh — computes positions from scratch at the current clock.
 - No keyless bulk source matches CelesTrak's coverage. Space-Track is the authoritative upstream but needs a free account, and SatNOGS is keyless but covers roughly 1,700 objects, mostly amateur and weather satellites. If you need to sidestep the download window entirely, export TLEs once and pass them with `--tle-file`; that path never touches the network.
 - Pass predictions sample every 20 seconds, so rise and set times are accurate to about that. Peak elevation is refined further.
 - GPS, GLONASS and BeiDou are reported as `navigation` because they are military-operated, but they are dual-use. Filter them out with `--class` if you only want reconnaissance and warning systems.

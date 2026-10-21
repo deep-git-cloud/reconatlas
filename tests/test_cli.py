@@ -63,3 +63,19 @@ def test_unknown_platform_is_rejected() -> None:
 def test_exif_requires_an_existing_file() -> None:
     result = _runner().invoke(cli, ["exif", "/nonexistent/file.jpg"])
     assert result.exit_code != 0
+
+
+def test_satellite_watch_rejects_exports(tmp_path) -> None:
+    tle = tmp_path / "catalog.txt"
+    tle.write_text(
+        "USA 224 (KH-11 14)\n"
+        "1 99999U 98067A   26293.54678875  .00016717  00000+0  30777-3 0  9993\n"
+        "2 99999  51.6416 247.4627 0006703 130.5360 325.0288 15.49512742 10000\n",
+        encoding="utf-8",
+    )
+    result = _runner().invoke(
+        cli,
+        ["satellite", "--tle-file", str(tle), "--watch", "1", "--json", str(tmp_path / "x.json")],
+    )
+    assert result.exit_code != 0
+    assert "cannot be combined" in result.output

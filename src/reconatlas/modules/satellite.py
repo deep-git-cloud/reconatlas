@@ -26,7 +26,9 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from dataclasses import dataclass, field
+from functools import lru_cache
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -253,8 +255,13 @@ class Pass:
 # ------------------------------------------------------------------ TLE parse
 
 
+@lru_cache(maxsize=4)
 def parse_tles(text: str) -> list[Tle]:
-    """Parse a block of three-line or two-line TLEs, skipping broken ones."""
+    """Parse a block of three-line or two-line TLEs, skipping broken ones.
+
+    Cached because a full catalogue is ~16k objects and ``--watch`` parses
+    the same text every cycle. Callers must treat the result as read-only.
+    """
     lines = [line.rstrip() for line in text.splitlines()]
     lines = [line for line in lines if line.strip()]
     out: list[Tle] = []
@@ -857,41 +864,97 @@ def collect_satellites(
     return findings, summary
 
 
+def watch(
+    http: Any,
+    *,
+    interval: float = 5.0,
+    console: Any | None = None,
+    **kwargs: Any,
+) -> None:
+    """Redraw live positions until interrupted.
+
+    The catalogue is downloaded once (or read from the cache / a file) and
+    every cycle only re-runs SGP4 for the current clock, so watching does
+    not consume CelesTrak's download allowance. ``kwargs`` are passed
+    straight to :func:`collect_satellites`.
+    """
+    from rich.console import Console
+    from rich.live import Live
+
+    console = console or Console()
+
+    def snapshot() -> tuple[ModuleResult, datetime]:
+        started = datetime.now(timezone.utc)
+        try:
+            findings, summary = collect_satellites(http, **kwargs)
+            errors = [str(err) for err in summary.get("source_errors") or []]
+            if summary.get("error"):
+                errors.append(str(summary["error"]))
+            result = ModuleResult(
+                name="satellite", findings=findings, summary=summary, errors=errors
+            )
+        except Exception as exc:  # noqa: BLE001 - keep the display alive
+            result = ModuleResult(
+                name="satellite",
+                status="error",
+                errors=[f"{type(exc).__name__}: {exc}"],
+            )
+        return result, started
+
+    if not console.is_terminal:
+        # Piped output cannot be redrawn, and a killed process would leave
+        # nothing behind: show one frame instead of pretending to animate.
+        result, started = snapshot()
+        console.print(build_renderable(result, started))
+        console.print("[dim]not a terminal: one snapshot shown, --watch ignored.[/dim]")
+        return
+
+    try:
+        with Live(console=console, auto_refresh=False, transient=False) as live:
+            while True:
+                result, started = snapshot()
+                live.update(build_renderable(result, started))
+                live.refresh()
+                time.sleep(max(interval, 1.0))
+    except KeyboardInterrupt:
+        console.print("\n[dim]stopped[/dim]")
+
+
 # --------------------------------------------------------------- rendering
 
 
-def render(report: "Any", console: Any | None = None) -> None:
-    """Render a satellite report as a purpose-built table."""
-    from rich.console import Console
+def build_renderable(result: ModuleResult, when: datetime | None = None) -> Any:
+    """Build the satellite table as a rich renderable.
+
+    Split out from :func:`render` so ``--watch`` can redraw in place
+    without stacking a new panel on the terminal every cycle.
+    """
+    from rich.console import Group
     from rich.table import Table
     from rich.text import Text
 
-    console = console or Console()
-    result: ModuleResult | None = report.modules.get("satellite")
-    if result is None:
-        return
-
     findings = result.findings
     if not findings:
-        for err in result.errors:
-            console.print(Text(f"error: {err}", style="red"))
-        console.print(Text("no military satellites matched", style="yellow"))
-        return
+        parts: list[Any] = [Text(f"error: {err}", style="red") for err in result.errors]
+        parts.append(Text("no military satellites matched", style="yellow"))
+        return Group(*parts)
 
-    title = Text.assemble(
-        ("military satellites  ", "bold white"),
-        (f"{len(findings)} shown", "cyan"),
-    )
-    console.print()
-    console.print(title)
-    console.print(Text(_summary_line(result.summary), style="dim"))
+    stamp = (when or datetime.now(timezone.utc)).strftime("%H:%M:%SZ")
+    parts = [
+        Text.assemble(
+            ("military satellites  ", "bold white"),
+            (f"{len(findings)} shown", "cyan"),
+            (f"  ·  {stamp}", "dim"),
+        ),
+        Text(_summary_line(result.summary), style="dim"),
+    ]
     if result.summary.get("tle_source") == "stale cache":
-        console.print(
+        parts.append(
             Text("using a cached catalogue: the source refused a refresh", style="yellow")
         )
     for err in result.errors:
-        console.print(Text(f"error: {err}", style="red"))
-    console.print()
+        parts.append(Text(f"error: {err}", style="red"))
+    parts.append(Text(""))
 
     table = Table(
         show_header=True,
@@ -909,14 +972,12 @@ def render(report: "Any", console: Any | None = None) -> None:
 
     for item in findings:
         meta = item.meta
-        klass = item.key
         style = "green" if meta.get("confidence") == "confirmed" else "cyan"
-
         elevation = meta.get("elevation")
         elevation_text = f"{elevation:.0f}°" if isinstance(elevation, (int, float)) else "-"
 
         table.add_row(
-            Text(klass, style=style),
+            Text(item.key, style=style),
             Text.assemble(
                 (meta.get("name", ""), "white"),
                 (f"  #{meta.get('norad', '')}", "dim"),
@@ -926,14 +987,13 @@ def render(report: "Any", console: Any | None = None) -> None:
             Text(elevation_text, style="yellow" if (elevation or -90) > 0 else "dim"),
             Text(str(meta.get("orbit", "")), style="dim"),
         )
-
-    console.print(table)
+    parts.append(table)
 
     # Pass predictions, when the caller asked for them.
     slated = [f for f in findings if f.meta.get("passes")]
     if slated:
-        console.print()
-        console.print(Text("next passes", style="bold"))
+        parts.append(Text(""))
+        parts.append(Text("next passes", style="bold"))
         pass_table = Table(
             show_header=True, header_style="bold magenta", border_style="dim", pad_edge=False
         )
@@ -951,17 +1011,30 @@ def render(report: "Any", console: Any | None = None) -> None:
                     f"{entry['max_elevation']:.0f}°",
                     f"{entry['duration_min']:.0f} min",
                 )
-        console.print(pass_table)
+        parts.append(pass_table)
 
     confirms = sum(1 for f in findings if f.meta.get("confidence") == "confirmed")
-    console.print()
-    console.print(
+    parts.append(Text(""))
+    parts.append(
         Text(
             f"{confirms} confirmed by source, {len(findings) - confirms} by name heuristic. "
             "Positions are SGP4 from public TLEs.",
             style="dim",
         )
     )
+    return Group(*parts)
+
+
+def render(report: "Any", console: Any | None = None) -> None:
+    """Render a satellite report as a purpose-built table."""
+    from rich.console import Console
+
+    console = console or Console()
+    result: ModuleResult | None = report.modules.get("satellite")
+    if result is None:
+        return
+    console.print()
+    console.print(build_renderable(result))
 
 
 def _summary_line(summary: dict[str, Any]) -> str:

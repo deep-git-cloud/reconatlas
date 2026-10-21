@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-21
+
+### Added
+
+- **`satellite --watch SECONDS`** redraws the position table in place
+  until interrupted. Only SGP4 is re-run each cycle, so watching spends
+  no CelesTrak download allowance: the catalogue is fetched once and
+  positions are recomputed for the current clock.
+- TLE parsing is memoised, which makes repeated lookups and watch
+  refreshes cheap.
+
+### Changed
+
+- The satellite header now carries the UTC time the positions were
+  computed, so a live view and a stale screenshot are distinguishable.
+
 ## [0.2.0] - 2026-10-21
 
 ### Added

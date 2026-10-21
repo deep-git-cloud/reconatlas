@@ -534,6 +534,14 @@ def wayback_cmd(domain: str, limit: int, subdomains: bool, **kwargs: Any) -> Non
     type=click.Path(dir_okay=False, path_type=str),
     help="Write current sub-points as GeoJSON for a map.",
 )
+@click.option(
+    "--watch",
+    "watch_seconds",
+    type=float,
+    default=0.0,
+    metavar="SECONDS",
+    help="Redraw positions live every N seconds until Ctrl-C, reusing the cached catalogue.",
+)
 def satellite_cmd(
     group: str,
     classes: tuple[str, ...],
@@ -548,6 +556,7 @@ def satellite_cmd(
     limit: int,
     tle_file: str | None,
     geojson_path: str | None,
+    watch_seconds: float,
     **kwargs: Any,
 ) -> None:
     """Detect military satellites and show where they are right now.
@@ -586,6 +595,28 @@ def satellite_cmd(
         observer = satellite_mod.Observer(lat=lat, lon=lon)
 
     target = observer.label if observer is not None and observer.label else "military satellites"
+
+    if watch_seconds > 0:
+        if geojson_path or any(
+            kwargs.get(key) for key in ("json_path", "csv_path", "jsonl_path", "html_path")
+        ):
+            raise click.UsageError("--watch cannot be combined with export options.")
+        satellite_mod.watch(
+            http,
+            interval=watch_seconds,
+            group=group,
+            classes=classes,
+            match=match,
+            observer=observer,
+            overhead=overhead,
+            min_elevation=min_elevation,
+            passes=passes_n,
+            hours=hours,
+            limit=limit,
+            tle_file=tle_file,
+        )
+        return
+
     report = Report(target=target, target_type="satellite")
     report.add(
         safe_collect(

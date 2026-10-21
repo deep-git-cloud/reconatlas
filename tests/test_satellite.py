@@ -382,6 +382,33 @@ def test_formatting_helpers() -> None:
     assert sat.format_lon(151.2) == "151.20°E"
 
 
+def test_build_renderable_stamps_the_position_time(stub: StubHttp) -> None:
+    from rich.console import Console
+
+    from reconatlas.models import ModuleResult
+
+    findings, summary = sat.collect_satellites(stub, limit=0)
+    result = ModuleResult(name="satellite", findings=findings, summary=summary)
+    console = Console(record=True, width=120)
+    console.print(sat.build_renderable(result, WHEN))
+    assert "12:00:00Z" in console.export_text()
+
+
+def test_watch_without_a_terminal_shows_one_snapshot(stub: StubHttp) -> None:
+    import io
+
+    from rich.console import Console
+
+    buffer = io.StringIO()
+    console = Console(file=buffer, width=120, force_terminal=False)
+    sat.watch(stub, interval=1, console=console, limit=0)
+    output = buffer.getvalue()
+    assert "KH-11" in output
+    assert "one snapshot" in output
+    # A single snapshot means the catalogue was fetched exactly once.
+    assert stub.calls == ["active", "military"]
+
+
 def test_json_export_is_serialisable(stub: StubHttp) -> None:
     from reconatlas.models import ModuleResult, Report
 

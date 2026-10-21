@@ -1,0 +1,690 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>reconatlas — orbital view</title>
+<style>
+  :root {
+    --bg: #070b12;
+    --panel: #0c131d;
+    --line: #1b2836;
+    --ink: #dbe7f3;
+    --dim: #7b8ea3;
+    --accent: #38bdf8;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 18px;
+    height: 52px; padding: 0 16px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #0d1520, #0a111a);
+  }
+  .brand { font-weight: 700; letter-spacing: .12em; font-size: 12px; white-space: nowrap; }
+  .brand span { color: var(--dim); font-weight: 500; letter-spacing: .04em; margin-left: 8px; text-transform: none; }
+  #stats { color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #stats b { color: var(--ink); font-weight: 600; }
+  .spacer { flex: 1; }
+  .controls { display: flex; align-items: center; gap: 10px; }
+  input[type=search], select, button {
+    background: #101a26; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 7px;
+    padding: 6px 9px; font: inherit; outline: none;
+  }
+  input[type=search] { width: 190px; }
+  input[type=search]:focus, select:focus { border-color: #2b4a63; }
+  button { cursor: pointer; }
+  button:hover { border-color: #2f556f; background: #14202e; }
+  button.on { border-color: #25637f; background: #0d2231; color: #7dd3fc; }
+  #clock { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 86px; text-align: right; }
+  main { display: flex; height: calc(100% - 52px); }
+  #map { position: relative; flex: 1; min-width: 0; background: #05090f; }
+  canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+  canvas.dragging { cursor: grabbing; }
+  #tooltip {
+    position: absolute; pointer-events: none; opacity: 0; transition: opacity .1s;
+    background: rgba(9, 15, 24, .96); border: 1px solid #273b4e; border-radius: 8px;
+    padding: 7px 10px; max-width: 260px; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    font-size: 12px; z-index: 5;
+  }
+  #tooltip b { display: block; color: #eaf4ff; font-size: 12.5px; margin-bottom: 2px; }
+  #tooltip span { color: var(--dim); }
+  #hint {
+    position: absolute; left: 12px; bottom: 10px; color: #4f6478;
+    font-size: 11px; pointer-events: none;
+  }
+  #reset {
+    position: absolute; right: 12px; top: 12px; font-size: 11px;
+    background: rgba(10,17,26,.8); border: 1px solid #223447; color: var(--dim);
+    border-radius: 6px; padding: 4px 8px; cursor: pointer;
+  }
+  #reset:hover { color: var(--ink); }
+  aside {
+    width: 340px; flex: none; border-left: 1px solid var(--line);
+    background: var(--panel); display: flex; flex-direction: column; min-height: 0;
+  }
+  #filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px; cursor: pointer; user-select: none;
+    border: 1px solid #1d2c3c; border-radius: 999px; padding: 3px 8px; color: var(--dim); font-size: 11px;
+  }
+  .chip:hover { border-color: #2b4358; color: var(--ink); }
+  .chip.off { opacity: .38; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  #list { overflow-y: auto; flex: 1; min-height: 0; }
+  .row {
+    display: flex; align-items: center; gap: 9px; padding: 7px 12px;
+    border-bottom: 1px solid #101b27; cursor: pointer;
+  }
+  .row:hover { background: #101b27; }
+  .row.active { background: #0e2233; box-shadow: inset 2px 0 0 var(--accent); }
+  .row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .meta { color: var(--dim); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .row .cls { color: #536b81; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
+  #detail {
+    border-top: 1px solid var(--line); padding: 10px 12px; display: none;
+    background: #0a121b; max-height: 42%; overflow-y: auto;
+  }
+  #detail.show { display: block; }
+  #detail h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+  #detail .kv { display: grid; grid-template-columns: 92px 1fr; gap: 2px 8px; font-size: 12px; }
+  #detail .kv div:nth-child(odd) { color: var(--dim); }
+  #detail .actions { margin-top: 8px; display: flex; gap: 6px; }
+  #detail .actions button { font-size: 11px; padding: 4px 8px; }
+  #status {
+    padding: 6px 12px; border-top: 1px solid var(--line); color: #5f7488;
+    font-size: 11px; font-variant-numeric: tabular-nums; display: flex; gap: 8px;
+  }
+  #status .warn { color: #fbbf24; }
+  @media (max-width: 860px) {
+    aside { width: 260px; }
+    input[type=search] { width: 110px; }
+    #stats { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">RECONATLAS<span>orbital view</span></div>
+  <div id="stats">loading…</div>
+  <div class="spacer"></div>
+  <div class="controls">
+    <input id="search" type="search" placeholder="filter name or NORAD" autocomplete="off">
+    <button id="pause" title="Pause the feed">Pause</button>
+    <select id="rate" title="Refresh rate">
+      <option value="1000">1 s</option>
+      <option value="2000" selected>2 s</option>
+      <option value="5000">5 s</option>
+      <option value="10000">10 s</option>
+    </select>
+    <span id="clock">--:--:--Z</span>
+  </div>
+</header>
+<main>
+  <section id="map">
+    <canvas id="canvas"></canvas>
+    <div id="tooltip"></div>
+    <button id="reset">reset view</button>
+    <div id="hint">drag to pan · scroll to zoom · click a dot for its ground track</div>
+  </section>
+  <aside>
+    <div id="filters"></div>
+    <div id="list"></div>
+    <div id="detail"></div>
+    <div id="status"></div>
+  </aside>
+</main>
+
+<script>
+"use strict";
+
+const COLORS = {
+  "recon": "#38bdf8",
+  "recon-optical": "#22d3ee",
+  "recon-radar": "#2dd4bf",
+  "sigint": "#fbbf24",
+  "early-warning": "#f87171",
+  "navigation": "#c084fc",
+  "comms": "#a3e635",
+  "military": "#cbd5e1",
+  "other": "#94a3b8"
+};
+
+const el = (id) => document.getElementById(id);
+const canvas = el("canvas");
+const ctx = canvas.getContext("2d");
+const tooltip = el("tooltip");
+
+let meta = null;
+let satellites = [];
+let land = null;
+let selected = null;
+let track = [];
+let paused = false;
+let timer = null;
+let lastUpdate = null;
+let hidden = new Set();
+let query = "";
+let hovered = null;
+let dirty = true;
+
+const view = { zoom: 1, panX: 0, panY: 0 };
+const pointer = { x: 0, y: 0, down: false, dragged: false, startX: 0, startY: 0, px: 0, py: 0 };
+
+const colorFor = (k) => COLORS[k] || COLORS.other;
+const maxAlt = 36000;
+
+/* ---------------------------------------------------------------- geometry */
+
+function sizeCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  dirty = true;
+}
+
+function proj(lat, lon) {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  return [
+    ((lon + 180) / 360) * w * view.zoom + view.panX,
+    ((90 - lat) / 180) * h * view.zoom + view.panY
+  ];
+}
+
+function clampView() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  view.panX = Math.min(0, Math.max(w - w * view.zoom, view.panX));
+  view.panY = Math.min(0, Math.max(h - h * view.zoom, view.panY));
+}
+
+function centerOn(lat, lon) {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  view.zoom = Math.max(view.zoom, 2.5);
+  const p = proj(lat, lon);
+  view.panX += w / 2 - p[0];
+  view.panY += h / 2 - p[1];
+  clampView();
+  dirty = true;
+}
+
+/* ------------------------------------------------------------- solar clock */
+
+function sunPosition(date) {
+  const rad = Math.PI / 180;
+  const jd = date.getTime() / 86400000 + 2440587.5;
+  const n = jd - 2451545.0;
+  const L = (280.460 + 0.9856474 * n) % 360;
+  const g = (357.528 + 0.9856003 * n) % 360;
+  const lambda = (L + 1.915 * Math.sin(g * rad) + 0.020 * Math.sin(2 * g * rad)) * rad;
+  const eps = (23.439 - 0.0000004 * n) * rad;
+  const decl = Math.asin(Math.sin(eps) * Math.sin(lambda));
+  const ra = Math.atan2(Math.cos(eps) * Math.sin(lambda), Math.cos(lambda));
+  const gmst = (280.46061837 + 360.98564736629 * (jd - 2451545.0)) % 360;
+  let lon = ra / rad - gmst;
+  lon = ((lon + 180) % 360 + 360) % 360 - 180;
+  return { lat: decl / rad, lon };
+}
+
+/* ----------------------------------------------------------------- drawing */
+
+function draw() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  ctx.clearRect(0, 0, w, h);
+
+  // ocean
+  const sea = ctx.createLinearGradient(0, 0, 0, h);
+  sea.addColorStop(0, "#08111c");
+  sea.addColorStop(1, "#050a12");
+  ctx.fillStyle = sea;
+  ctx.fillRect(0, 0, w, h);
+
+  drawLand();
+  drawGraticule();
+
+  const sun = sunPosition(new Date());
+  drawNight(sun);
+  if (meta && meta.observer) drawObserver(meta.observer);
+  if (selected) drawTrack();
+  drawSatellites();
+}
+
+function landPath() {
+  const path = new Path2D();
+  for (const ring of land.rings) {
+    for (let i = 0; i < ring.length; i++) {
+      const [x, y] = proj(ring[i][1], ring[i][0]);
+      if (i === 0) path.moveTo(x, y); else path.lineTo(x, y);
+    }
+    path.closePath();
+  }
+  return path;
+}
+
+function drawLand() {
+  if (!land) return;
+  const path = landPath();
+  ctx.fillStyle = "#132030";
+  ctx.strokeStyle = "#21384d";
+  ctx.lineWidth = 0.6;
+  ctx.fill(path);
+  ctx.stroke(path);
+}
+
+function drawGraticule() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  ctx.save();
+  ctx.strokeStyle = "rgba(90, 130, 160, .10)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let lon = -180; lon <= 180; lon += 30) {
+    const x = proj(0, lon)[0];
+    ctx.moveTo(x, 0); ctx.lineTo(x, h);
+  }
+  for (let lat = -60; lat <= 60; lat += 30) {
+    const y = proj(lat, 0)[1];
+    ctx.moveTo(0, y); ctx.lineTo(w, y);
+  }
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(120, 155, 185, .30)";
+  ctx.font = "10px ui-monospace, monospace";
+  for (let lon = -150; lon <= 150; lon += 60) {
+    const x = proj(0, lon)[0];
+    ctx.fillText(lon === 0 ? "0°" : `${Math.abs(lon)}°${lon > 0 ? "E" : "W"}`, x + 3, 12);
+  }
+  ctx.restore();
+}
+
+function drawNight(sun) {
+  const rad = Math.PI / 180;
+  const pole = sun.lat > 0 ? -90 : 90;
+  const pts = [];
+  for (let lon = -180; lon <= 180; lon += 2) {
+    const l = (lon - sun.lon) * rad;
+    // Standard terminator: tan(lat) = -cos(hour angle) / tan(declination).
+    let lat = Math.atan(-Math.cos(l) / Math.tan(sun.lat * rad)) / rad;
+    lat = Math.max(-89.5, Math.min(89.5, lat));
+    pts.push(proj(lat, lon));
+  }
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  const edge = proj(pole, 180);
+  ctx.lineTo(edge[0], edge[1]);
+  const edge2 = proj(pole, -180);
+  ctx.lineTo(edge2[0], edge2[1]);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(2, 6, 14, .58)";
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawObserver(obs) {
+  const [x, y] = proj(obs.lat, obs.lon);
+  ctx.save();
+  ctx.strokeStyle = "#f472b6";
+  ctx.fillStyle = "#f472b6";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, y, 1.8, 0, Math.PI * 2); ctx.fill();
+  ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
+  ctx.fillText(obs.label || "observer", x + 9, y + 4);
+  ctx.restore();
+}
+
+function drawTrack() {
+  if (!track.length) return;
+  ctx.save();
+  ctx.strokeStyle = colorFor(selected.class);
+  ctx.globalAlpha = 0.55;
+  ctx.lineWidth = 1.4;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  let started = false;
+  let prevLon = null;
+  for (const [lat, lon] of track) {
+    if (prevLon !== null && Math.abs(lon - prevLon) > 180) started = false;
+    const [x, y] = proj(lat, lon);
+    if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+    prevLon = lon;
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawSatellites() {
+  const vis = visibleSatellites();
+  const zoomBoost = view.zoom > 3 ? 1.4 : 1;
+  for (const s of vis) {
+    const [x, y] = proj(s.lat, s.lon);
+    if (x < -20 || y < -20 || x > canvas.clientWidth + 20 || y > canvas.clientHeight + 20) continue;
+
+    const color = colorFor(s.class);
+    const isSel = selected && selected.norad === s.norad;
+    const isHover = hovered && hovered.norad === s.norad;
+    const size = (s.confidence === "confirmed" ? 3.1 : 2.4) * zoomBoost;
+
+    if (s.confidence === "confirmed") {
+      ctx.beginPath();
+      ctx.arc(x, y, size * 2.4, 0, Math.PI * 2);
+      ctx.fillStyle = hexA(color, 0.13);
+      ctx.fill();
+    }
+    ctx.beginPath();
+    ctx.arc(x, y, isHover || isSel ? size + 1.6 : size, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    if (isSel || isHover) {
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    }
+  }
+}
+
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+/* ------------------------------------------------------------------- data */
+
+function visibleSatellites() {
+  const q = query.trim().toLowerCase();
+  return satellites.filter((s) => {
+    if (hidden.has(s.class)) return false;
+    if (!q) return true;
+    return s.name.toLowerCase().includes(q) || String(s.norad).includes(q);
+  });
+}
+
+async function loadMeta() {
+  const r = await fetch("/api/meta", { cache: "no-store" });
+  meta = await r.json();
+  if (!land) {
+    land = await (await fetch("/data/land.json", { cache: "force-cache" })).json();
+  }
+  buildFilters();
+  el("stats").innerHTML = `${meta.matched} matched <span style="opacity:.5">·</span> catalogue ${meta.catalog_size.toLocaleString()}`;
+  dirty = true;
+}
+
+async function loadPositions() {
+  if (paused) return;
+  try {
+    const r = await fetch("/api/positions", { cache: "no-store" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    satellites = data.satellites;
+    lastUpdate = new Date(data.generated);
+    renderList();
+    if (selected) {
+      const fresh = satellites.find((s) => s.norad === selected.norad);
+      if (fresh) { selected = fresh; renderDetail(); }
+    }
+    status(data.summary || null);
+    dirty = true;
+  } catch (err) {
+    el("status").innerHTML = `<span class="warn">feed unavailable</span><span>${err.message}</span>`;
+  }
+}
+
+async function loadTrack(norad) {
+  try {
+    const r = await fetch(`/api/track?norad=${encodeURIComponent(norad)}`, { cache: "no-store" });
+    if (!r.ok) { track = []; return; }
+    const data = await r.json();
+    track = data.points || [];
+    dirty = true;
+  } catch (_) { track = []; }
+}
+
+/* -------------------------------------------------------------------- ui */
+
+function buildFilters() {
+  const counts = {};
+  for (const s of satellites.length ? satellites : []) counts[s.class] = (counts[s.class] || 0) + 1;
+  const classes = meta.classes || Object.keys(COLORS);
+  el("filters").innerHTML = "";
+  for (const k of classes) {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.dataset.cls = k;
+    chip.innerHTML = `<span class="dot" style="background:${colorFor(k)}"></span>${k}`;
+    chip.onclick = () => {
+      if (hidden.has(k)) hidden.delete(k); else hidden.add(k);
+      chip.classList.toggle("off", hidden.has(k));
+      renderList(); dirty = true;
+    };
+    el("filters").appendChild(chip);
+  }
+}
+
+function renderList() {
+  const vis = visibleSatellites();
+  const sorted = [...vis].sort((a, b) => {
+    if (meta.observer) {
+      const ea = a.elevation == null ? -90 : a.elevation;
+      const eb = b.elevation == null ? -90 : b.elevation;
+      if (eb !== ea) return eb - ea;
+    }
+    return a.name.localeCompare(b.name);
+  });
+  const frag = document.createDocumentFragment();
+  for (const s of sorted) {
+    const row = document.createElement("div");
+    row.className = "row" + (selected && selected.norad === s.norad ? " active" : "");
+    const el2 = s.elevation != null
+      ? `${s.elevation.toFixed(0)}°`
+      : `${Math.round(s.alt_km).toLocaleString()} km`;
+    row.innerHTML = `
+      <span class="dot" style="background:${colorFor(s.class)}"></span>
+      <span class="name">${escapeHtml(s.name)}<br><span class="cls">${s.class}</span></span>
+      <span class="meta">${el2}</span>`;
+    row.onclick = () => select(s.norad);
+    frag.appendChild(row);
+  }
+  el("list").replaceChildren(frag);
+}
+
+function renderDetail() {
+  const box = el("detail");
+  if (!selected) { box.classList.remove("show"); return; }
+  const s = selected;
+  const rows = [
+    ["NORAD", s.norad],
+    ["Class", s.class],
+    ["Programme", s.programme || "—"],
+    ["Operator", s.country || "unknown"],
+    ["Confidence", s.confidence],
+    ["Sub-point", `${fmtLat(s.lat)} ${fmtLon(s.lon)}`],
+    ["Altitude", `${Math.round(s.alt_km).toLocaleString()} km`],
+    ["Orbit", s.orbit || "—"]
+  ];
+  if (s.elevation != null) rows.push(["Elevation", `${s.elevation.toFixed(1)}°`]);
+  if (s.azimuth != null) rows.push(["Azimuth", `${s.azimuth.toFixed(1)}°`]);
+  if (s.range_km != null) rows.push(["Range", `${Math.round(s.range_km).toLocaleString()} km`]);
+  rows.push(["TLE age", `${s.tle_age_hours.toFixed(1)} h`]);
+  box.innerHTML = `<h3>${escapeHtml(s.name)}</h3>
+    <div class="kv">${rows.map(([k, v]) => `<div>${k}</div><div>${escapeHtml(String(v))}</div>`).join("")}</div>
+    <div class="actions">
+      <button id="go">centre map</button>
+      <button id="untrack">close</button>
+    </div>`;
+  box.classList.add("show");
+  el("go").onclick = () => centerOn(s.lat, s.lon);
+  el("untrack").onclick = () => { selected = null; track = []; renderDetail(); renderList(); dirty = true; };
+}
+
+function select(norad) {
+  const s = satellites.find((x) => x.norad === norad);
+  if (!s) return;
+  selected = s;
+  track = [];
+  loadTrack(norad);
+  renderDetail();
+  renderList();
+  dirty = true;
+}
+
+function status(summary) {
+  let text = lastUpdate
+    ? `updated ${lastUpdate.toISOString().slice(11, 19)}Z`
+    : "waiting for data";
+  const vis = visibleSatellites();
+  if (vis.length !== satellites.length) text += ` · ${vis.length} of ${satellites.length} shown`;
+  if (summary && summary.observer) text += " · observer set";
+  el("status").textContent = text;
+}
+
+function fmtLat(v) { return `${Math.abs(v).toFixed(2)}°${v >= 0 ? "N" : "S"}`; }
+function fmtLon(v) { return `${Math.abs(v).toFixed(2)}°${v >= 0 ? "E" : "W"}`; }
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/* ------------------------------------------------------------- interaction */
+
+function nearest(evt) {
+  const rect = canvas.getBoundingClientRect();
+  const x = evt.clientX - rect.left, y = evt.clientY - rect.top;
+  let best = null, bestD = 12;
+  for (const s of visibleSatellites()) {
+    const [sx, sy] = proj(s.lat, s.lon);
+    const d = Math.hypot(sx - x, sy - y);
+    if (d < bestD) { bestD = d; best = s; }
+  }
+  return best;
+}
+
+canvas.addEventListener("mousemove", (evt) => {
+  if (pointer.down) {
+    const dx = evt.clientX - pointer.px, dy = evt.clientY - pointer.py;
+    if (Math.abs(dx) + Math.abs(dy) > 3) pointer.dragged = true;
+    view.panX += dx; view.panY += dy;
+    pointer.px = evt.clientX; pointer.py = evt.clientY;
+    clampView();
+    dirty = true;
+    return;
+  }
+  hovered = nearest(evt);
+  const rect = canvas.getBoundingClientRect();
+  if (hovered) {
+    tooltip.style.opacity = "1";
+    tooltip.style.left = `${evt.clientX - rect.left + 14}px`;
+    tooltip.style.top = `${evt.clientY - rect.top + 14}px`;
+    tooltip.innerHTML = `<b>${escapeHtml(hovered.name)}</b>
+      <span>${hovered.class} · ${Math.round(hovered.alt_km).toLocaleString()} km</span><br>
+      <span>${fmtLat(hovered.lat)} ${fmtLon(hovered.lon)}</span>`;
+  } else {
+    tooltip.style.opacity = "0";
+  }
+  dirty = true;
+});
+
+canvas.addEventListener("mouseleave", () => {
+  hovered = null;
+  tooltip.style.opacity = "0";
+  dirty = true;
+});
+
+canvas.addEventListener("pointerdown", (evt) => {
+  pointer.down = true;
+  pointer.dragged = false;
+  pointer.px = evt.clientX; pointer.py = evt.clientY;
+  canvas.classList.add("dragging");
+  canvas.setPointerCapture(evt.pointerId);
+});
+
+canvas.addEventListener("pointerup", (evt) => {
+  pointer.down = false;
+  canvas.classList.remove("dragging");
+  if (!pointer.dragged) {
+    const hit = nearest(evt);
+    if (hit) select(hit.norad);
+  }
+});
+
+canvas.addEventListener("wheel", (evt) => {
+  evt.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const mx = evt.clientX - rect.left, my = evt.clientY - rect.top;
+  const wx = (mx - view.panX) / view.zoom;
+  const wy = (my - view.panY) / view.zoom;
+  const factor = Math.exp(-evt.deltaY * 0.0015);
+  const next = Math.min(8, Math.max(1, view.zoom * factor));
+  if (next === 1) { view.panX = 0; view.panY = 0; }
+  view.zoom = next;
+  view.panX = mx - wx * view.zoom;
+  view.panY = my - wy * view.zoom;
+  clampView();
+  dirty = true;
+}, { passive: false });
+
+el("reset").onclick = () => { view.zoom = 1; view.panX = 0; view.panY = 0; dirty = true; };
+
+el("search").addEventListener("input", (e) => {
+  query = e.target.value;
+  renderList();
+  dirty = true;
+});
+
+el("pause").onclick = () => {
+  paused = !paused;
+  el("pause").textContent = paused ? "Resume" : "Pause";
+  el("pause").classList.toggle("on", paused);
+  if (!paused) loadPositions();
+};
+
+el("rate").onchange = () => schedule();
+
+function schedule() {
+  clearInterval(timer);
+  timer = setInterval(loadPositions, Number(el("rate").value));
+}
+
+/* ------------------------------------------------------------------- loop */
+
+function tick() {
+  el("clock").textContent = new Date().toISOString().slice(11, 19) + "Z";
+  if (dirty) { draw(); dirty = false; }
+  requestAnimationFrame(tick);
+}
+
+window.addEventListener("resize", () => { sizeCanvas(); });
+new ResizeObserver(() => { sizeCanvas(); }).observe(canvas);
+
+// Small hook so the page can be driven from the console (and from tests).
+window.__viewer = {
+  draw,
+  project: proj,
+  snapshot: () => ({ satellites, meta, land: !!land, track, selected })
+};
+
+(async function start() {
+  sizeCanvas();
+  requestAnimationFrame(tick);
+  try {
+    await loadMeta();
+    await loadPositions();
+    // The filter chips need class counts from the first position batch.
+    buildFilters();
+  } catch (err) {
+    el("status").innerHTML = `<span class="warn">cannot reach the local viewer server</span>`;
+  }
+  schedule();
+  setInterval(() => { if (selected) loadTrack(selected.norad); }, 30000);
+})();
+</script>
+</body>
+</html>

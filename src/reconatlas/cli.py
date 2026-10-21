@@ -542,6 +542,22 @@ def wayback_cmd(domain: str, limit: int, subdomains: bool, **kwargs: Any) -> Non
     metavar="SECONDS",
     help="Redraw positions live every N seconds until Ctrl-C, reusing the cached catalogue.",
 )
+@click.option(
+    "--viewer",
+    is_flag=True,
+    help="Open a live map in your browser, served locally (no external tiles or keys).",
+)
+@click.option(
+    "--port",
+    type=int,
+    default=0,
+    help="Port for --viewer (0 picks a free one).",
+)
+@click.option(
+    "--no-browser",
+    is_flag=True,
+    help="With --viewer, print the URL instead of opening a browser.",
+)
 def satellite_cmd(
     group: str,
     classes: tuple[str, ...],
@@ -557,6 +573,9 @@ def satellite_cmd(
     tle_file: str | None,
     geojson_path: str | None,
     watch_seconds: float,
+    viewer: bool,
+    port: int,
+    no_browser: bool,
     **kwargs: Any,
 ) -> None:
     """Detect military satellites and show where they are right now.
@@ -596,10 +615,32 @@ def satellite_cmd(
 
     target = observer.label if observer is not None and observer.label else "military satellites"
 
+    exports = geojson_path or any(
+        kwargs.get(key) for key in ("json_path", "csv_path", "jsonl_path", "html_path")
+    )
+
+    if viewer:
+        if watch_seconds > 0:
+            raise click.UsageError("--viewer and --watch cannot be combined.")
+        if exports:
+            raise click.UsageError("--viewer cannot be combined with export options.")
+        from . import viewer as viewer_mod
+
+        catalogue = satellite_mod.load_catalogue(http, group=group, tle_file=tle_file)
+        viewer_mod.serve(
+            catalogue,
+            port=port,
+            observer=observer,
+            classes=classes,
+            match=match,
+            overhead=overhead,
+            min_elevation=min_elevation,
+            open_browser=not no_browser,
+        )
+        return
+
     if watch_seconds > 0:
-        if geojson_path or any(
-            kwargs.get(key) for key in ("json_path", "csv_path", "jsonl_path", "html_path")
-        ):
+        if exports:
             raise click.UsageError("--watch cannot be combined with export options.")
         satellite_mod.watch(
             http,

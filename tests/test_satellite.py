@@ -7,7 +7,7 @@ client is a stub, so results are deterministic and no network is touched.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -298,13 +298,14 @@ def test_collect_surfaces_the_celestrak_throttle_message() -> None:
 
 
 def test_throttle_hint_names_the_next_window() -> None:
+    last = datetime.now(timezone.utc) - timedelta(minutes=15)
     body = (
         "GP data has not updated since your last successful\r\n"
-        "download of GROUP=active at 2026-10-21 09:29:28 UTC.\r\n"
+        f"download of GROUP=active at {last:%Y-%m-%d %H:%M:%S} UTC.\r\n"
         "Data is updated once every 2 hours."
     )
     hint = sat._throttle_hint(body)
-    assert "11:29Z" in hint
+    assert f"{last + timedelta(hours=2):%H:%M}Z" in hint
     assert "min" in hint
 
 
@@ -373,6 +374,27 @@ def test_render_does_not_crash(stub: StubHttp) -> None:
     output = console.export_text()
     assert "KH-11" in output
     assert "Sub-point" in output
+
+
+def test_snapshot_reuses_a_loaded_catalogue(stub: StubHttp) -> None:
+    catalogue = sat.load_catalogue(stub)
+    assert stub.calls == ["active", "military"]
+
+    first, _ = sat.snapshot(catalogue, limit=0, when=WHEN)
+    second, _ = sat.snapshot(catalogue, limit=0, when=WHEN + timedelta(minutes=1))
+
+    # No refetch, and the catalogue order is not disturbed by sorting a view.
+    assert stub.calls == ["active", "military"]
+    assert first[0].meta["lat"] != second[0].meta["lat"]
+    assert [item.tle.norad for item in catalogue.detected] == ["99999"]
+
+
+def test_collect_with_observer_reports_look_angles_without_overhead() -> None:
+    stub = StubHttp({"active": MH_TLE, "military": MH_TLE})
+    findings, _ = sat.collect_satellites(
+        stub, observer=sat.Observer(lat=51.5, lon=-0.1), limit=0
+    )
+    assert findings[0].meta["elevation"] is not None
 
 
 def test_formatting_helpers() -> None:

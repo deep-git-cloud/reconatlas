@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-21
+
+### Added
+
+- **`satellite --viewer`** opens a live world map in the browser, served
+  from loopback. No tiles, CDN or key: coastlines ship with the package.
+  Hover for details, click for a two-hour ground track, filter by class,
+  search by name or NORAD, and watch the day/night terminator move.
+- **`--port`** and **`--no-browser`** for the viewer, so it can run on a
+  headless or remote machine.
+- `satellite.load_catalogue()` and `satellite.snapshot()` separate
+  classification from propagation, so a live view costs one catalogue
+  load and milliseconds per refresh.
+- `satellite.ground_track()` for the points behind a sub-satellite path.
+- Bundled Natural Earth 110m land outlines (public domain) and the
+  viewer page are included as package data.
+
+### Changed
+
+- An observer position now always produces look angles, not only with
+  `--overhead` or `--passes`.
+- `--watch` reuses the loaded catalogue instead of reclassifying the
+  whole catalogue every cycle.
+
 ## [0.3.0] - 2026-10-21
 
 ### Added

@@ -541,6 +541,30 @@ def next_passes(
     return passes
 
 
+def ground_track(
+    tle: Tle,
+    *,
+    minutes: float = 120.0,
+    step: float = 60.0,
+    when: datetime | None = None,
+) -> list[tuple[float, float]]:
+    """Sub-satellite points across a window centred on ``when``.
+
+    Used by the browser viewer to draw where an object has been and is
+    going. Longitude is not unwrapped: the caller draws each segment, so
+    a track crossing the antimeridian does not shoot across the map.
+    """
+    centre = when or datetime.now(timezone.utc)
+    start = centre - timedelta(minutes=minutes / 2.0)
+    count = max(2, int(minutes * 60.0 / step))
+    points: list[tuple[float, float]] = []
+    for index in range(count + 1):
+        pos = position(tle, start + timedelta(seconds=index * step))
+        if pos is not None:
+            points.append((round(pos.lat, 2), round(pos.lon, 2)))
+    return points
+
+
 # ------------------------------------------------------------- presentation
 
 
@@ -673,26 +697,27 @@ def _interleave(items: Sequence[Detected]) -> list[Detected]:
 # ------------------------------------------------------------------ collector
 
 
-def collect_satellites(
+@dataclass
+class Catalogue:
+    """A loaded, classified catalogue that can be re-propagated cheaply."""
+
+    detected: list[Detected] = field(default_factory=list)
+    summary: dict[str, Any] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)
+    stale: bool = False
+
+
+def load_catalogue(
     http: Any,
     *,
     group: str = "active",
-    classes: Sequence[str] = (),
-    match: str = "",
-    observer: Observer | None = None,
-    overhead: bool = False,
-    min_elevation: float = 0.0,
-    passes: int = 0,
-    hours: float = 24.0,
-    limit: int = 40,
     tle_file: str | None = None,
-) -> tuple[list[Finding], dict[str, Any]]:
-    """Detect military satellites and report where they are.
+) -> Catalogue:
+    """Fetch (or read) a catalogue and classify it once.
 
-    ``tle_file`` reads a local two- or three-line TLE file and skips the
-    network entirely, which is the way around CelesTrak's download limit.
-
-    Returns ``(findings, summary)`` so it can be driven by ``safe_collect``.
+    Detection over the full catalogue costs about half a second, while
+    SGP4 over a few hundred objects costs milliseconds. Splitting the two
+    lets a live view redraw without reclassifying 16,000 names per frame.
     """
     summary: dict[str, Any] = {"catalog_group": group}
     errors: list[str] = []
@@ -704,7 +729,7 @@ def collect_satellites(
         summary["catalog_group"] = f"file:{Path(tle_file).name}"
         if error:
             summary["error"] = error
-            return [], summary
+            return Catalogue(summary=summary, errors=errors)
         # No network signal for the curated group; name heuristics only.
         military_norad: set[str] = set()
     else:
@@ -724,7 +749,7 @@ def collect_satellites(
 
     if not catalog and not military:
         summary["error"] = "; ".join(errors) or "no catalogue data"
-        return [], summary
+        return Catalogue(summary=summary, errors=errors)
 
     pool = catalog or military
     if not catalog and military:
@@ -735,6 +760,33 @@ def collect_satellites(
     detected = detect(pool, military_norad)
     summary["catalog_size"] = len(pool)
     summary["military_matches"] = len(detected)
+
+    ages = [tle.age_hours for tle in pool[:1]]
+    if ages and ages[0] > STALE_TLE_HOURS:
+        summary["stale_tle_hours"] = round(ages[0], 1)
+    return Catalogue(detected, summary, errors, catalog_stale)
+
+
+def snapshot(
+    catalogue: Catalogue,
+    *,
+    classes: Sequence[str] = (),
+    match: str = "",
+    observer: Observer | None = None,
+    overhead: bool = False,
+    min_elevation: float = 0.0,
+    passes: int = 0,
+    hours: float = 24.0,
+    limit: int = 40,
+    when: datetime | None = None,
+) -> tuple[list[Finding], dict[str, Any]]:
+    """Turn a loaded catalogue into findings for one instant.
+
+    Returns ``(findings, summary)`` so it can be driven by ``safe_collect``.
+    """
+    summary = dict(catalogue.summary)
+    errors = list(catalogue.errors)
+    detected = list(catalogue.detected)
 
     wanted = {c.strip().lower() for c in classes if c.strip()}
     if wanted:
@@ -748,10 +800,10 @@ def collect_satellites(
         ]
 
     # Propagate before filtering on elevation: that filter needs look angles.
-    now = datetime.now(timezone.utc)
+    now = when or datetime.now(timezone.utc)
     positions: dict[str, Position] = {}
     for item in detected:
-        pos = position(item.tle, now, observer=observer if (overhead or passes) else None)
+        pos = position(item.tle, now, observer=observer)
         if pos is not None:
             positions[item.tle.norad] = pos
 
@@ -851,10 +903,6 @@ def collect_satellites(
     if errors:
         summary["source_errors"] = errors
 
-    ages = [tle.age_hours for tle in pool[:1]]
-    if ages and ages[0] > STALE_TLE_HOURS:
-        summary["stale_tle_hours"] = round(ages[0], 1)
-
     summary["shown"] = len(findings)
     summary["classes"] = ",".join(f"{k}={v}" for k, v in sorted(counts.items()))
     if observer is not None:
@@ -862,6 +910,39 @@ def collect_satellites(
         if observer.label:
             summary["observer_name"] = observer.label
     return findings, summary
+
+
+def collect_satellites(
+    http: Any,
+    *,
+    group: str = "active",
+    classes: Sequence[str] = (),
+    match: str = "",
+    observer: Observer | None = None,
+    overhead: bool = False,
+    min_elevation: float = 0.0,
+    passes: int = 0,
+    hours: float = 24.0,
+    limit: int = 40,
+    tle_file: str | None = None,
+) -> tuple[list[Finding], dict[str, Any]]:
+    """Detect military satellites and report where they are.
+
+    ``tle_file`` reads a local two- or three-line TLE file and skips the
+    network entirely, which is the way around CelesTrak's download limit.
+    """
+    catalogue = load_catalogue(http, group=group, tle_file=tle_file)
+    return snapshot(
+        catalogue,
+        classes=classes,
+        match=match,
+        observer=observer,
+        overhead=overhead,
+        min_elevation=min_elevation,
+        passes=passes,
+        hours=hours,
+        limit=limit,
+    )
 
 
 def watch(
@@ -875,18 +956,26 @@ def watch(
 
     The catalogue is downloaded once (or read from the cache / a file) and
     every cycle only re-runs SGP4 for the current clock, so watching does
-    not consume CelesTrak's download allowance. ``kwargs`` are passed
-    straight to :func:`collect_satellites`.
+    not consume CelesTrak's download allowance.
     """
     from rich.console import Console
     from rich.live import Live
 
     console = console or Console()
 
-    def snapshot() -> tuple[ModuleResult, datetime]:
+    try:
+        catalogue = load_catalogue(
+            http,
+            group=kwargs.pop("group", "active"),
+            tle_file=kwargs.pop("tle_file", None),
+        )
+    except Exception as exc:  # noqa: BLE001 - still show why it failed
+        catalogue = Catalogue(summary={"error": f"{type(exc).__name__}: {exc}"})
+
+    def frame() -> tuple[ModuleResult, datetime]:
         started = datetime.now(timezone.utc)
         try:
-            findings, summary = collect_satellites(http, **kwargs)
+            findings, summary = snapshot(catalogue, when=started, **kwargs)
             errors = [str(err) for err in summary.get("source_errors") or []]
             if summary.get("error"):
                 errors.append(str(summary["error"]))
@@ -904,7 +993,7 @@ def watch(
     if not console.is_terminal:
         # Piped output cannot be redrawn, and a killed process would leave
         # nothing behind: show one frame instead of pretending to animate.
-        result, started = snapshot()
+        result, started = frame()
         console.print(build_renderable(result, started))
         console.print("[dim]not a terminal: one snapshot shown, --watch ignored.[/dim]")
         return
@@ -912,7 +1001,7 @@ def watch(
     try:
         with Live(console=console, auto_refresh=False, transient=False) as live:
             while True:
-                result, started = snapshot()
+                result, started = frame()
                 live.update(build_renderable(result, started))
                 live.refresh()
                 time.sleep(max(interval, 1.0))

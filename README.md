@@ -270,6 +270,7 @@ osint satellite --place "London" --overhead
 osint satellite --lat 51.5 --lon -0.1 --passes 3 --hours 12
 osint satellite --place "London" --overhead --geojson sats.geojson
 osint satellite --tle-file ./active.tle      # offline, no download limit
+osint satellite --viewer                     # live map in your browser
 ```
 
 ```text
@@ -298,6 +299,20 @@ osint satellite --place "London" --overhead --watch 5
 Every five seconds the table is redrawn at the current clock. Only SGP4 is re-run — the orbital elements are parsed once and cached — so a long watch session never touches the network again. The UTC stamp in the header shows which moment you are looking at; `Ctrl-C` stops it.
 
 Piped output cannot be redrawn, so `--watch` prints a single frame and exits when stdout is not a terminal. Exports (`--json`, `--csv`, `--geojson`, …) cannot be combined with it.
+
+### Orbital view (browser)
+
+For a map instead of a table:
+
+```bash
+osint satellite --place "London" --viewer
+```
+
+Your browser opens a page served from `127.0.0.1`. The server ships its own coastlines, so there are no tiles, no CDN, no key and nothing sent anywhere except between the page and the local process. `Ctrl-C` stops it.
+
+The map is an equirectangular world view with a live day/night terminator. Hover a dot for its name and altitude; click it for the full record and a two-hour ground track. The sidebar filters by class and searches by name or NORAD, and positions refresh every two seconds by default (1–10 s selectable). Pausing stops the polling without stopping the server.
+
+`--overhead` and `--min-elevation` filter the feed, and `--place` or `--lat`/`--lon` adds your position so objects are ordered by elevation. `--no-browser` prints the URL without launching anything, which is what you want on a headless box; `--port` pins the port instead of picking a free one.
 
 ### How detection works
 
@@ -385,6 +400,8 @@ src/reconatlas/
     breaches.py     Public breach corpus
     wayback.py      Internet Archive history
     satellite.py    Military satellite detection and SGP4 propagation
+  viewer.py         Local browser map (loopback only)
+  data/             Coastlines and the viewer page
   util/             Network and text helpers
 tests/              Offline test suite
 ```

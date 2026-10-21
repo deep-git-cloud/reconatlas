@@ -306,7 +306,7 @@ Nothing is inferred from radio, imagery or behaviour. The tool does not *detect*
 ### Caveats
 
 - Positions are only as good as the TLE epoch. A fresh TLE puts a LEO object within a few kilometres; a week-old one does not. The epoch and its age are in the JSON output.
-- CelesTrak refreshes every two hours and refuses repeat downloads of the same group from one address. reconatlas caches for two hours and reuses a stale copy rather than failing, and says so when it does.
+- CelesTrak refreshes every two hours and refuses repeat downloads of the same group from one address. reconatlas caches the catalogue for six hours and reuses a stale copy rather than failing. If there is no cached copy, it says when the next refresh is allowed rather than just erroring. Use `--no-cache` to force a refresh once the window has passed.
 - Pass predictions sample every 20 seconds, so rise and set times are accurate to about that. Peak elevation is refined further.
 - GPS, GLONASS and BeiDou are reported as `navigation` because they are military-operated, but they are dual-use. Filter them out with `--class` if you only want reconnaissance and warning systems.
 - This is public orbital data. It tells you where a catalogued object is, not what it is looking at.

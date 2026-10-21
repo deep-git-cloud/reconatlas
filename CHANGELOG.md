@@ -25,7 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Stale-cache fallback.** `HttpClient.get()` accepts `ttl` and
   `allow_stale`; when an API refuses a refresh, the last good response can
   be reused instead of failing. Used for CelesTrak, which permits one
-  download of a group every two hours per address.
+  download of a group every two hours per address. The TLE cache lasts
+  six hours, and if the source refuses and no cache exists, the error
+  names the time the next refresh becomes available.
 
 ### Changed
 

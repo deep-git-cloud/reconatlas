@@ -297,6 +297,21 @@ def test_collect_surfaces_the_celestrak_throttle_message() -> None:
     assert "rate limited" in summary["error"]
 
 
+def test_throttle_hint_names_the_next_window() -> None:
+    body = (
+        "GP data has not updated since your last successful\r\n"
+        "download of GROUP=active at 2026-10-21 09:29:28 UTC.\r\n"
+        "Data is updated once every 2 hours."
+    )
+    hint = sat._throttle_hint(body)
+    assert "11:29Z" in hint
+    assert "min" in hint
+
+
+def test_throttle_hint_without_a_timestamp() -> None:
+    assert sat._throttle_hint("something else went wrong") == ""
+
+
 def test_collect_reports_partial_source_errors() -> None:
     stub = StubHttp({"active": MH_TLE, "military": ""})
     findings, summary = sat.collect_satellites(stub, limit=0)

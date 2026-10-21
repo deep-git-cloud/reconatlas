@@ -45,8 +45,10 @@ WGS84_E2 = WGS84_F * (2.0 - WGS84_F)
 STALE_TLE_HOURS = 72.0
 
 #: CelesTrak refreshes GP data every two hours and refuses repeat downloads
-#: of the same group from one address inside that window.
-TLE_CACHE_TTL = 2 * 60 * 60
+#: of the same group from one address inside that window. Caching for six
+#: hours means a normal user refreshes a few times a day and almost never
+#: meets the limit. TLEs stay accurate for far longer than that.
+TLE_CACHE_TTL = 6 * 60 * 60
 
 #: Class order used for sorting, most interesting first.
 CLASS_ORDER = (
@@ -549,6 +551,34 @@ def format_utc(value: datetime) -> str:
 # ------------------------------------------------------------------- network
 
 
+_THROTTLE_STAMP = re.compile(r"at (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) UTC")
+
+
+def _throttle_hint(text: str) -> str:
+    """Turn CelesTrak's refusal into a concrete "try again at" hint.
+
+    The body reads::
+
+        GP data has not updated since your last successful download of
+        GROUP=active at 2026-10-21 09:29:28 UTC. Data is updated once
+        every 2 hours.
+    """
+    match = _THROTTLE_STAMP.search(text)
+    if not match:
+        return ""
+    try:
+        last = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S").replace(
+            tzinfo=timezone.utc
+        )
+    except ValueError:
+        return ""
+    ready = last + timedelta(hours=2)
+    minutes = int((ready - datetime.now(timezone.utc)).total_seconds() // 60)
+    if minutes <= 0:
+        return "the window has expired, retry now"
+    return f"next refresh allowed at {ready:%H:%M}Z, in about {minutes} min"
+
+
 def _fetch_catalog(http: Any, group: str) -> tuple[list[Tle], str, bool]:
     """Fetch one CelesTrak group and parse it.
 
@@ -563,10 +593,11 @@ def _fetch_catalog(http: Any, group: str) -> tuple[list[Tle], str, bool]:
         allow_stale=True,
     )
     if not fetch.ok and "has not updated since" in fetch.text:
-        return [], (
-            f"celestrak {group}: rate limited (this group was already downloaded "
-            "in the last two hours; no cached copy available)"
-        ), False
+        hint = _throttle_hint(fetch.text)
+        detail = "rate limited by source"
+        if hint:
+            detail += f" ({hint})"
+        return [], f"celestrak {group}: {detail}", False
     if not fetch.ok:
         detail = fetch.error or f"HTTP {fetch.status}"
         return [], f"celestrak {group}: {detail}", False

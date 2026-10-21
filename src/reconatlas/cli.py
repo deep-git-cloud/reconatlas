@@ -23,6 +23,7 @@ from .modules import (
     exif as exif_mod,
     ipinfo as ipinfo_mod,
     rdap as rdap_mod,
+    satellite as satellite_mod,
     subdomains as subdomains_mod,
     tlsinfo as tlsinfo_mod,
     username as username_mod,
@@ -111,8 +112,17 @@ def _close_clients() -> None:
     _OPEN_CLIENTS.clear()
 
 
-def emit(report: Report, opts: dict[str, Any], cfg: Config) -> None:
-    """Render the report and write any requested exports."""
+def emit(
+    report: Report,
+    opts: dict[str, Any],
+    cfg: Config,
+    renderer: Callable[[Report], None] | None = None,
+) -> None:
+    """Render the report and write any requested exports.
+
+    ``renderer`` overrides the generic console output for commands that
+    deserve a purpose-built table. Exports are unaffected.
+    """
     if opts.get("json_path"):
         path = export_json(report, opts["json_path"])
         if not cfg.quiet:
@@ -132,11 +142,13 @@ def emit(report: Report, opts: dict[str, Any], cfg: Config) -> None:
 
     if cfg.quiet:
         return
-    renderer = ConsoleRenderer()
+    console = ConsoleRenderer()
     if opts.get("summary"):
-        renderer.render_summary(report)
+        console.render_summary(report)
+    elif renderer is not None:
+        renderer(report)
     else:
-        renderer.render(report)
+        console.render(report)
 
 
 def result_from(name: str, findings: Sequence[Finding], summary: dict[str, Any],
@@ -484,6 +496,120 @@ def wayback_cmd(domain: str, limit: int, subdomains: bool, **kwargs: Any) -> Non
     report.add(safe_collect("wayback", wayback_mod.collect_wayback, domain, ctx.http,
                              limit=limit, subdomains=subdomains))
     emit(report, kwargs, cfg)
+
+
+@cli.command("satellite")
+@common_options
+@click.option(
+    "--group",
+    type=click.Choice(["active", "military"]),
+    default="active",
+    show_default=True,
+    help="Catalogue to scan: the full public active set, or CelesTrak's curated military group.",
+)
+@click.option(
+    "--class",
+    "classes",
+    type=click.Choice(satellite_mod.CLASS_ORDER),
+    multiple=True,
+    help="Only these classes (repeatable).",
+)
+@click.option("--match", default="", help="Only objects whose name or NORAD id contains this text.")
+@click.option("--lat", type=float, default=None, help="Observer latitude, decimal degrees.")
+@click.option("--lon", type=float, default=None, help="Observer longitude, decimal degrees.")
+@click.option("--place", default="", help="Observer place name, geocoded with OpenStreetMap.")
+@click.option("--overhead", is_flag=True, help="Only objects currently above the horizon.")
+@click.option("--min-elevation", type=float, default=0.0, help="Minimum elevation in degrees.")
+@click.option("--passes", "passes_n", type=int, default=0, help="Also predict the next N passes.")
+@click.option("--hours", type=float, default=24.0, show_default=True, help="Pass search window.")
+@click.option("--limit", type=int, default=40, show_default=True, help="Maximum objects (0 = all).")
+@click.option(
+    "--geojson",
+    "geojson_path",
+    type=click.Path(dir_okay=False, path_type=str),
+    help="Write current sub-points as GeoJSON for a map.",
+)
+def satellite_cmd(
+    group: str,
+    classes: tuple[str, ...],
+    match: str,
+    lat: float | None,
+    lon: float | None,
+    place: str,
+    overhead: bool,
+    min_elevation: float,
+    passes_n: int,
+    hours: float,
+    limit: int,
+    geojson_path: str | None,
+    **kwargs: Any,
+) -> None:
+    """Detect military satellites and show where they are right now.
+
+    Scans CelesTrak's public catalogue, flags objects that appear in its
+    military group or whose name matches a known military programme, and
+    propagates each one with SGP4 to its current sub-satellite point.
+
+    Give an observer position to get look angles, filter to what is
+    overhead, or predict the next passes.
+    """
+    if (overhead or passes_n > 0) and not place and (lat is None or lon is None):
+        raise click.UsageError(
+            "--overhead and --passes need an observer position: use --lat/--lon or --place."
+        )
+    if lat is not None and not -90.0 <= lat <= 90.0:
+        raise click.BadParameter("--lat must be between -90 and 90.")
+    if lon is not None and not -180.0 <= lon <= 180.0:
+        raise click.BadParameter("--lon must be between -180 and 180.")
+
+    cfg = make_config(**kwargs)
+    http = HttpClient(cfg)
+    _OPEN_CLIENTS.append(http)
+
+    observer: satellite_mod.Observer | None = None
+    if place:
+        resolved = satellite_mod.geocode(http, place)
+        if resolved is None:
+            raise click.ClickException(f"could not find a place called '{place}'")
+        observer = satellite_mod.Observer(
+            lat=lat if lat is not None else resolved.lat,
+            lon=lon if lon is not None else resolved.lon,
+            label=resolved.label,
+        )
+    elif lat is not None and lon is not None:
+        observer = satellite_mod.Observer(lat=lat, lon=lon)
+
+    target = observer.label if observer is not None and observer.label else "military satellites"
+    report = Report(target=target, target_type="satellite")
+    report.add(
+        safe_collect(
+            "satellite",
+            satellite_mod.collect_satellites,
+            http,
+            group=group,
+            classes=classes,
+            match=match,
+            observer=observer,
+            overhead=overhead,
+            min_elevation=min_elevation,
+            passes=passes_n,
+            hours=hours,
+            limit=limit,
+        )
+    )
+
+    if geojson_path:
+        import json as _json
+
+        from pathlib import Path as _Path
+
+        payload = satellite_mod.to_geojson(report.by_category("satellite"))
+        path = _Path(geojson_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_json.dumps(payload, indent=2), encoding="utf-8")
+        click.echo(f"GeoJSON: {path}")
+
+    emit(report, kwargs, cfg, renderer=satellite_mod.render)
 
 
 @cli.command("report")

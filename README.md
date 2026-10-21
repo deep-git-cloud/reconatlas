@@ -1,6 +1,6 @@
 # reconatlas
 
-Recon a domain, IP, email or username from one CLI. Subdomain enumeration, DNS, RDAP, TLS, breach corpora, EXIF and 40+ username platforms — all on free, keyless sources.
+Recon a domain, IP, email or username from one CLI, and track military satellites. Subdomain enumeration, DNS, RDAP, TLS, breach corpora, EXIF, 40+ username platforms and live orbital positions — all on free, keyless sources.
 
 Every module queries **free, public, keyless** data sources, so there is no account to create, no API key to buy, and nothing to configure before the first run.
 
@@ -20,6 +20,7 @@ osint domain example.com
 - [Output formats](#output-formats)
 - [Configuration](#configuration)
 - [How the username checker decides](#how-the-username-checker-decides)
+- [Military satellite tracking](#military-satellite-tracking)
 - [Using reconatlas as a library](#using-reconatlas-as-a-library)
 - [Project layout](#project-layout)
 - [Tests](#tests)
@@ -124,6 +125,7 @@ osint domain example.com --json report.json --csv findings.csv --html report.htm
 | `osint dorks <target>` | Search-engine queries for a target, ready to paste or launch |
 | `osint breaches <domain>` | Every known breach affecting a domain, from the public corpus |
 | `osint wayback <domain>` | Archived history, first and last snapshot, HTTP status spread |
+| `osint satellite` | Detects military and classified satellites and shows where they are now |
 | `osint report <target>` | Runs whichever modules apply to a domain, IP, email or username |
 | `osint platforms` | Lists every username platform that is checked |
 
@@ -161,6 +163,7 @@ Everything below is public and works without credentials.
 | Breaches | The public Have I Been Pwned breach corpus |
 | Archives | Internet Archive CDX API |
 | Usernames | Public profile pages and public JSON APIs (GitHub, GitLab, PyPI, Keybase, …) |
+| Satellites | CelesTrak GP catalogue (TLE), SGP4 propagation, OpenStreetMap Nominatim for place names |
 
 Public APIs have rate limits and occasionally go down. Every collector degrades gracefully: a source that fails is reported as an error on that module, the module is marked `partial`, and the remaining sources still contribute results.
 
@@ -249,6 +252,67 @@ Platforms with a public JSON API (GitHub, GitLab, PyPI, Keybase, …) are checke
 
 ---
 
+## Military satellite tracking
+
+`osint satellite` scans the public CelesTrak catalogue, flags the objects that are military or state-operated, and propagates each one with SGP4 to its current sub-satellite point.
+
+```bash
+osint satellite                        # full public catalogue, every match
+osint satellite --group military       # only CelesTrak's curated military group
+osint satellite --class recon --class sigint
+osint satellite --match YAOGAN
+```
+
+Give it an observer position and it adds look angles, filters to what is actually above your horizon, and predicts the next passes:
+
+```bash
+osint satellite --place "London" --overhead
+osint satellite --lat 51.5 --lon -0.1 --passes 3 --hours 12
+osint satellite --place "London" --overhead --geojson sats.geojson
+```
+
+```text
+military satellites  8 shown
+catalog=15,923, matched=420, classes: comms=1,navigation=5,recon=1, observer=London, England
+
+┏━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━┳━━━━━━┓
+┃Class      ┃ Object               ┃ Sub-point        ┃       Alt ┃  El ┃ Orbit┃
+┡━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━╇━━━━━━┩
+│comms      │ TJS-13  #62188       │ 46.67°N   1.66°W │ 24,642 km │ 84° │ MEO  │
+│recon      │ YAOGAN-9 01A  #36413 │ 51.86°N   2.07°W │  1,114 km │ 82° │ LEO  │
+│navigation │ NAVSTAR 55 (USA 178) │ 54.75°N  10.15°W │ 20,515 km │ 81° │ MEO  │
+└───────────┴──────────────────────┴──────────────────┴───────────┴─────┴──────┘
+```
+
+*(trimmed — positions change constantly.)*
+
+### How detection works
+
+Two public signals, nothing else:
+
+1. **CelesTrak's curated military group.** Small and explicit, and the only place the catalogue itself labels an object military.
+2. **Programme names.** A checked table of known programmes and designations — `KH-11`, `Lacrosse`/`Onyx`, `Mentor`/`Orion`, `SBIRS`, `DSP`, `AEHF`, `Milstar`, `WGS`, `MUOS`, `Yaogan`, `GLONASS`, `Persona`, `Bars-M`, `Lotos`, `Tundra`/`EKS`, `SAR-Lupe`, `Helios`, `CSO`, `IGS`, `Ofeq`, `RISAT`, `USA nnn`, `NROL-nn` and others.
+
+Every result carries a confidence:
+
+| Confidence | Meaning |
+|---|---|
+| `confirmed` | In the curated military group, or an unambiguous programme name |
+| `likely` | Name matches a known programme pattern |
+| `possible` | Weaker match, worth checking yourself |
+
+Nothing is inferred from radio, imagery or behaviour. The tool does not *detect* a satellite in the signals sense — it classifies a public catalogue and computes where those objects are. "Military" is a judgement based on naming, so the confidence is always shown next to the result.
+
+### Caveats
+
+- Positions are only as good as the TLE epoch. A fresh TLE puts a LEO object within a few kilometres; a week-old one does not. The epoch and its age are in the JSON output.
+- CelesTrak refreshes every two hours and refuses repeat downloads of the same group from one address. reconatlas caches for two hours and reuses a stale copy rather than failing, and says so when it does.
+- Pass predictions sample every 20 seconds, so rise and set times are accurate to about that. Peak elevation is refined further.
+- GPS, GLONASS and BeiDou are reported as `navigation` because they are military-operated, but they are dual-use. Filter them out with `--class` if you only want reconnaissance and warning systems.
+- This is public orbital data. It tells you where a catalogued object is, not what it is looking at.
+
+---
+
 ## Using reconatlas as a library
 
 ```python
@@ -306,6 +370,7 @@ src/reconatlas/
     dorks.py        Search query generation
     breaches.py     Public breach corpus
     wayback.py      Internet Archive history
+    satellite.py    Military satellite detection and SGP4 propagation
   util/             Network and text helpers
 tests/              Offline test suite
 ```
@@ -331,6 +396,9 @@ The suite runs entirely offline — no network calls — and covers the parsers,
 - Username and subdomain results include false positives by nature. The
   confidence level and the reason are reported for every result so you
   can judge them.
+- Satellite positions come from public orbital elements and are
+  approximate. Military classification is a naming heuristic, not an
+  identification; check the reported confidence before relying on it.
 - Only use this against systems you own or have explicit written
   permission to investigate. Collection against third parties may breach
   the law in your jurisdiction, and it is unfair to the operators whose

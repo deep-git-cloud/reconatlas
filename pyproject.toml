@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reconatlas"
-version = "0.1.0"
-description = "Recon a domain, IP, email or username from one CLI. Subdomain enumeration, DNS, RDAP, TLS, breach corpora, EXIF and 40+ username platforms - all on free, keyless sources."
+version = "0.2.0"
+description = "Recon a domain, IP, email or username from one CLI, and track military satellites. Subdomain enumeration, DNS, RDAP, TLS, breach corpora, EXIF, 40+ username platforms and live orbital positions - all on free, keyless sources."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -23,6 +23,10 @@ keywords = [
     "exif",
     "metadata",
     "username-enumeration",
+    "satellite",
+    "sgp4",
+    "space",
+    "orbital-mechanics",
     "threat-intelligence",
     "security-tooling",
     "cli",
@@ -49,6 +53,7 @@ dependencies = [
     "dnspython>=2.4",
     "Pillow>=10.0",
     "beautifulsoup4>=4.12",
+    "sgp4>=2.23",
 ]
 
 [project.optional-dependencies]

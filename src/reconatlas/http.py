@@ -42,6 +42,9 @@ class Fetch:
     elapsed: float = 0.0
     cached: bool = False
     final_url: str = ""
+    stale: bool = False
+    """True when a cached body was returned past its TTL because the
+    origin refused the refresh (e.g. CelesTrak's 2-hour download limit)."""
 
     def json(self) -> Any:
         """Parse the body as JSON, returning ``None`` when it is not valid."""
@@ -123,12 +126,13 @@ class HttpClient:
         folder = self.cfg.cache_dir / digest[:2]
         return folder / f"{digest}.json"
 
-    def _read_cache(self, path: Path) -> Fetch | None:
+    def _read_cache(self, path: Path, ttl: int | None = None, ignore_expiry: bool = False) -> Fetch | None:
+        ttl = self.cfg.cache_ttl if ttl is None else ttl
         try:
             stat = path.stat()
         except OSError:
             return None
-        if self.cfg.cache_ttl <= 0:
+        if ttl <= 0 and not ignore_expiry:
             return None
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
@@ -137,12 +141,13 @@ class HttpClient:
 
         # An explicit expiry lets error responses be cached briefly without
         # pinning a transient failure for the whole cache lifetime.
-        expires = payload.get("expires_at")
-        if expires is not None:
-            if time.time() >= float(expires):
+        if not ignore_expiry:
+            expires = payload.get("expires_at")
+            if expires is not None:
+                if time.time() >= float(expires):
+                    return None
+            elif (time.time() - stat.st_mtime) > ttl:
                 return None
-        elif (time.time() - stat.st_mtime) > self.cfg.cache_ttl:
-            return None
 
         return Fetch(
             url=payload.get("url", ""),
@@ -156,10 +161,10 @@ class HttpClient:
             final_url=payload.get("final_url", ""),
         )
 
-    def _write_cache(self, path: Path, fetch: Fetch) -> None:
-        if self.cfg.no_cache or self.cfg.cache_ttl <= 0:
+    def _write_cache(self, path: Path, fetch: Fetch, ttl: int | None = None) -> None:
+        ttl = self.cfg.cache_ttl if ttl is None else ttl
+        if self.cfg.no_cache or ttl <= 0:
             return
-        ttl = self.cfg.cache_ttl
         if not fetch.ok:
             # Failures expire quickly so a recovered API is picked up at once.
             ttl = min(ttl, ERROR_CACHE_TTL)
@@ -193,11 +198,19 @@ class HttpClient:
         timeout: float | None = None,
         allow_redirects: bool = True,
         method: str = "GET",
+        ttl: int | None = None,
+        allow_stale: bool = False,
     ) -> Fetch:
-        """Perform a request and return a :class:`Fetch` (never raises)."""
+        """Perform a request and return a :class:`Fetch` (never raises).
+
+        ``ttl`` overrides the global cache lifetime for this request.
+        ``allow_stale`` returns an expired cached body when the origin
+        refuses the refresh, which matters for APIs that rate-limit hard
+        (CelesTrak allows one download of a group every two hours).
+        """
         cache_path = self._cache_path(url, params)
         if cache and not self.cfg.no_cache:
-            cached = self._read_cache(cache_path)
+            cached = self._read_cache(cache_path, ttl=ttl)
             if cached is not None:
                 return cached
 
@@ -220,8 +233,13 @@ class HttpClient:
                 error=f"{type(exc).__name__}: {exc}",
                 elapsed=time.monotonic() - started,
             )
+            if allow_stale:
+                stale = self._read_cache(cache_path, ignore_expiry=True)
+                if stale is not None:
+                    stale.stale = True
+                    return stale
             if cache:
-                self._write_cache(cache_path, fetch)
+                self._write_cache(cache_path, fetch, ttl=ttl)
             return fetch
 
         fetch = Fetch(
@@ -233,8 +251,13 @@ class HttpClient:
             elapsed=time.monotonic() - started,
             final_url=response.url,
         )
+        if not fetch.ok and allow_stale:
+            stale = self._read_cache(cache_path, ignore_expiry=True)
+            if stale is not None:
+                stale.stale = True
+                return stale
         if cache:
-            self._write_cache(cache_path, fetch)
+            self._write_cache(cache_path, fetch, ttl=ttl)
         return fetch
 
     def get_json(self, url: str, **kwargs: Any) -> Any:

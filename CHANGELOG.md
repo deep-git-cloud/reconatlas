@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-21
+
+### Added
+
+- **`satellite`** — detects military and state-operated satellites from
+  CelesTrak's public GP catalogue and reports where each one is right now.
+  Objects are flagged from CelesTrak's curated military group or from a
+  checked table of known programmes (KH-11, Lacrosse/Onyx, SBIRS, DSP,
+  AEHF, Yaogan, GLONASS, Persona, SAR-Lupe, CSO and others), each with a
+  `confirmed` / `likely` / `possible` confidence.
+- **SGP4 propagation** to the current sub-satellite point, with optional
+  observer look angles (elevation, azimuth, range), horizon filtering,
+  next-pass prediction and GeoJSON export for map tools.
+- **`--place`** geocoding through OpenStreetMap Nominatim, so an observer
+  position can be given as a place name.
+- **Stale-cache fallback.** `HttpClient.get()` accepts `ttl` and
+  `allow_stale`; when an API refuses a refresh, the last good response can
+  be reused instead of failing. Used for CelesTrak, which permits one
+  download of a group every two hours per address.
+
+### Changed
+
+- `emit()` takes an optional renderer, so a command can supply a
+  purpose-built table without affecting the exporters.
+- `sgp4` is now a dependency.
+
 ## [0.1.0] - 2026-10-20
 
 Initial release.
